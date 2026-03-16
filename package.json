@@ -1,9 +1,9 @@
 {
   "name": "alpine-install-claude",
-  "version": "1.0.2",
+  "version": "1.0.3",
   "description": "Install and launch Claude Code on Alpine Linux",
   "bin": {
-    "alpine-install-claude": "./bin/alpine-install-claude"
+    "alpine-install-claude": "bin/alpine-install-claude"
   },
   "files": [
     "bin/"
@@ -20,7 +20,7 @@
   "license": "MIT",
   "repository": {
     "type": "git",
-    "url": "https://github.com/negati-ve/alpine-install-claude.git"
+    "url": "git+https://github.com/negati-ve/alpine-install-claude.git"
   },
   "engines": {
     "node": ">=18.0.0"
