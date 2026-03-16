@@ -1,0 +1,117 @@
+#!/usr/bin/env node
+"use strict";
+
+const { spawnSync } = require("child_process");
+const fs = require("fs");
+const https = require("https");
+const os = require("os");
+const path = require("path");
+
+const isAlpine = fs.existsSync("/etc/alpine-release");
+
+function run(cmd, opts = {}) {
+  return spawnSync(cmd, { shell: true, stdio: "inherit", ...opts });
+}
+
+function log(msg) {
+  console.log(`\n\x1b[36m>>> ${msg}\x1b[0m\n`);
+}
+
+function fail(msg) {
+  console.error(`\n\x1b[31m[ERROR] ${msg}\x1b[0m\n`);
+  process.exit(1);
+}
+
+function hasBin(name) {
+  return spawnSync(`which ${name}`, { shell: true, encoding: "utf8" }).status === 0;
+}
+
+function apkAdd(packages) {
+  const cmd = `apk add --no-cache ${packages}`;
+  const r = run(cmd);
+  if (r.status !== 0) {
+    const sr = run(`sudo ${cmd}`);
+    if (sr.status !== 0) fail(`apk install failed for: ${packages}\nMake sure you have root or sudo access.`);
+  }
+}
+
+if (!isAlpine) {
+  console.warn("\x1b[33m[WARN] /etc/alpine-release not found — this tool targets Alpine Linux.\x1b[0m");
+}
+
+// 1. Install system packages via apk (curl included here so it's available for the installer)
+log("Installing system dependencies via apk...");
+apkAdd("bash git curl libgcc libstdc++ ripgrep");
+
+// 2. Set USE_BUILTIN_RIPGREP=0 in shell profiles
+log("Configuring environment...");
+const envLine = "\nexport USE_BUILTIN_RIPGREP=0\n";
+for (const p of [path.join(os.homedir(), ".bashrc"), path.join(os.homedir(), ".profile")]) {
+  try {
+    const existing = fs.existsSync(p) ? fs.readFileSync(p, "utf8") : "";
+    if (!existing.includes("USE_BUILTIN_RIPGREP")) fs.appendFileSync(p, envLine);
+  } catch (_) {}
+}
+process.env.USE_BUILTIN_RIPGREP = "0";
+
+// 3. Install Claude — prefer curl, fall back to Node https if curl still missing
+log("Installing Claude Code...");
+
+function installWithCurl() {
+  return run("curl -fsSL https://claude.ai/install.sh | bash");
+}
+
+function installWithNode() {
+  return new Promise((resolve, reject) => {
+    const tmpScript = path.join(os.tmpdir(), "claude-install.sh");
+    const file = fs.createWriteStream(tmpScript);
+    https.get("https://claude.ai/install.sh", (res) => {
+      if (res.statusCode !== 200) return reject(new Error(`HTTP ${res.statusCode}`));
+      res.pipe(file);
+      file.on("finish", () => {
+        file.close();
+        fs.chmodSync(tmpScript, 0o755);
+        const r = run(`bash ${tmpScript}`);
+        try { fs.unlinkSync(tmpScript); } catch (_) {}
+        resolve(r);
+      });
+    }).on("error", reject);
+  });
+}
+
+async function main() {
+  if (hasBin("curl")) {
+    const r = installWithCurl();
+    if (r.status !== 0) fail("Claude Code installation failed.");
+  } else {
+    log("curl not found — using Node.js https to download installer...");
+    const r = await installWithNode();
+    if (r.status !== 0) fail("Claude Code installation failed.");
+  }
+
+  // 4. Find the claude binary
+  const localBin = path.join(os.homedir(), ".local", "bin");
+  process.env.PATH = `${localBin}:${process.env.PATH}`;
+
+  const candidates = [
+    path.join(localBin, "claude"),
+    "/usr/local/bin/claude",
+    "/usr/bin/claude",
+  ];
+  const claudeBin = candidates.find((p) => fs.existsSync(p));
+
+  if (!claudeBin && spawnSync("which claude", { shell: true }).status !== 0) {
+    fail("claude binary not found after installation.\nAdd ~/.local/bin to your PATH and run 'claude' manually.");
+  }
+
+  // 5. Launch Claude
+  log("Launching Claude Code...");
+  const launch = spawnSync(claudeBin || "claude", process.argv.slice(2), {
+    stdio: "inherit",
+    env: { ...process.env, USE_BUILTIN_RIPGREP: "0" },
+    shell: !claudeBin,
+  });
+  process.exit(launch.status ?? 0);
+}
+
+main().catch((err) => fail(`Installation error: ${err.message}`));

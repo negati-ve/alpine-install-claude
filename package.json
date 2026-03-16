@@ -1,6 +1,6 @@
 {
   "name": "alpine-install-claude",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Install and launch Claude Code on Alpine Linux",
   "bin": {
     "alpine-install-claude": "./bin/alpine-install-claude.js"
